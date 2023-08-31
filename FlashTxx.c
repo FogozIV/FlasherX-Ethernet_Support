@@ -73,8 +73,9 @@ void firmware_buffer_free( uint32_t buffer_addr, uint32_t buffer_size )
 //******************************************************************************
 int check_flash_id( uint32_t buffer, uint32_t size )
 {
-  for (uint32_t i = buffer; i < buffer + size - strlen(FLASH_ID); ++i) {
-    if (strncmp((char *)i, FLASH_ID, strlen(FLASH_ID)) == 0)
+  const uint32_t bufferSize = buffer + size - FLASH_ID_LEN;
+  for (uint32_t i = buffer; i < bufferSize; ++i) {
+    if (strncmp((char *)i, FLASH_ID, FLASH_ID_LEN) == 0)
       return 1;
   }
   return 0;
