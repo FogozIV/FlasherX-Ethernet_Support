@@ -15,6 +15,28 @@
 
 #include <stdint.h>     // uint32_t, etc.
 
+/* --------------------------------------------------------------------------------------------
+ * USE_RAM_FOR_FLASHING def
+ *
+ * Size in KB to store the firmware in memory, if defined, otherwise it will be stored in flash.
+ * Once firmware is stored in either flash or memory, it will ultimately end up in a certain
+ * address in flash and the device will reboot.
+ *
+ * When building your program, something like this is printed to the output:
+ *
+ * Memory Usage on Teensy 4.1:
+ * FLASH: code:171304, data:51148, headers:8968   free for files:7895044
+ * RAM1: variables:55136, code:167976, padding:28632   free for local variables:272544
+ * RAM2: variables:79616  free for malloc/new:444672
+ *
+ * The number after "free for malloc/new:" is the available RAM usage before your program runs.
+ * You shouldn't request anything more than this. Remember, 1 KB is 1,024 bytes.
+ *
+ * Default is to store in flash. Uncomment USE_RAM_FOR_FLASHING to store in RAM.
+ *
+ */
+//#define USE_RAM_FOR_FLASHING 275
+
 #if defined(__MKL26Z64__)
   #define FLASH_ID		"fw_teensyLC"		// target ID (in code)
   #define FLASH_SIZE		(0x10000)		// 64KB program flash
@@ -77,8 +99,12 @@
 #endif
 
 #if defined(FLASH_ID)
-  #define RAM_BUFFER_SIZE	(0 * 1024)
-  #define IN_FLASH(a) ((a) >= FLASH_BASE_ADDR && (a) < FLASH_BASE_ADDR+FLASH_SIZE)
+  #ifdef USE_RAM_FOR_FLASHING
+    #define RAM_BUFFER_SIZE ((USE_RAM_FOR_FLASHING) * 1024)
+  #else
+    #define RAM_BUFFER_SIZE (0*1024)
+  #endif
+#define IN_FLASH(a) ((a) >= FLASH_BASE_ADDR && (a) < FLASH_BASE_ADDR + FLASH_SIZE)
 #endif
 
 // reboot is the same for all ARM devices

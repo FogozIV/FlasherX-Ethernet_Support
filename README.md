@@ -1,5 +1,12 @@
 # FlasherX
+## Differences from joepasquariello/FlasherX
+This forked branch adds methods to update the Teensy 4.1 board via the Ethernet using the TeensyOtaUpdater class. Both FXUtil.h and FXUtils.cpp/h were updated to increase readability and what I think are some optimzations (although
+very minor). The TeensyOtaUpdater includes a method to register a callback function. When an update is available, the
+function will be called to alert upper layers that an update is pending. Afterwards the upper layer will have to call
+applyUpdate() to apply the firmware and reboot. Example .ino in the examples folder.
 
+Requires the QNEthernet library and the AsyncWebServer_Teensy41 library from my branch (my branch includes a fix for the onupload event).
+## Original Description
 OTA (over-the-air) firmware updates for Teensy LC/3.x/4.x/MicroMod.
 
 FlasherX is a merge of Flasher3 and Flasher4 by Jon Zeeff, with updates to work with Teensy LC, 3.2, 3.5, 3.6, 4.0, 4.1, and Micromod.  The update method is to transfer the new firmware to the Teensy via Serial (USB or UART), SD, or any other available interface, buffer the new firmware in unused flash, erase the existing firmware, copy the new firmware from the buffer to the flash base address, erase the buffer, and reboot to run the new firmware.

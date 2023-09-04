@@ -7,19 +7,27 @@ extern "C" {
   #include "FlashTxx.h"		// TLC/T3x/T4x/TMM flash primitives
 }
 
+#define fx_min(a, b) ((a) < (b) ? (a) : (b))
+
 //******************************************************************************
 // update_firmware()	read hex file and write new firmware to program flash
 //******************************************************************************
 void update_firmware( Stream *in, Stream *out, 
 				uint32_t buffer_addr, uint32_t buffer_size )
 {
-  static char line[96];					// buffer for hex lines
-  static char data[32] __attribute__ ((aligned (8)));	// buffer for hex data
-  hex_info_t hex = {					// intel hex info struct
-    data, 0, 0, 0,					//   data,addr,num,code
-    0, 0xFFFFFFFF, 0, 					//   base,min,max,
-    0, 0						//   eof,lines
-  };
+  static char line[HEX_LINE_MAX_SIZE];                // buffer for hex lines
+  static char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(8))); // buffer for hex data
+  hex_info_t hex;
+  hex.data = data;
+  hex.addr = 0;
+  hex.code = 0;
+  hex.num = 0;
+  hex.base = 0;
+  hex.min = 0xFFFFFFFF;
+  hex.max = 0;
+  hex.eof = 0;
+  hex.lines = 0;
+  hex.prevDataLen = 0;
 
   out->printf( "reading hex lines...\n" );
 
@@ -53,7 +61,7 @@ void update_firmware( Stream *in, Stream *out,
         int error = flash_write_block( addr, hex.data, hex.num );
         if (error) {
           out->printf( "abort - error %02X in flash_write_block()\n", error );
-	  return;
+          return;
         }
       }
     }
@@ -137,25 +145,25 @@ void read_ascii_line( Stream *serial, char *line, int maxbytes )
 //******************************************************************************
 int process_hex_record( hex_info_t *hex )
 {
-  if (hex->code==0) { // data -- update min/max address so far
+  if (hex->code==IRT_DATA) { // data -- update min/max address so far
     if (hex->base + hex->addr + hex->num > hex->max)
       hex->max = hex->base + hex->addr + hex->num;
     if (hex->base + hex->addr < hex->min)
       hex->min = hex->base + hex->addr;
   }
-  else if (hex->code==1) { // EOF (:flash command not received yet)
+  else if (hex->code==IRT_EOF) { // EOF (:flash command not received yet)
     hex->eof = 1;
   }
-  else if (hex->code==2) { // extended segment address (top 16 of 24-bit addr)
+  else if (hex->code==IRT_ES_ADDR) { // extended segment address (top 16 of 24-bit addr)
     hex->base = ((hex->data[0] << 8) | hex->data[1]) << 4;
   }
-  else if (hex->code==3) { // start segment address (80x86 real mode only)
+  else if (hex->code==IRT_SS_ADDR) { // start segment address (80x86 real mode only)
     return 1;
   }
-  else if (hex->code==4) { // extended linear address (top 16 of 32-bit addr)
+  else if (hex->code==IRT_EL_ADDR) { // extended linear address (top 16 of 32-bit addr)
     hex->base = ((hex->data[0] << 8) | hex->data[1]) << 16;
   }
-  else if (hex->code==5) { // start linear address (32-bit big endian addr)
+  else if (hex->code==IRT_SL_ADDR) { // start linear address (32-bit big endian addr)
     hex->base = (hex->data[0] << 24) | (hex->data[1] << 16)
               | (hex->data[2] <<  8) | (hex->data[3] <<  0);
   }
@@ -201,8 +209,112 @@ int process_hex_record( hex_info_t *hex )
 #include <stdio.h>		// sscanf(), etc.
 #include <string.h>		// strlen(), etc.
 
-int parse_hex_line( const char *theline, char *bytes, 
-		unsigned int *addr, unsigned int *num, unsigned int *code )
+// New implementation. Takes a pointer to the line to parse, the length of the line
+// plus the length of any remaining lines, and a pointer to the HexInfo to update.
+// This implementation is aware fragmented data can be passed between calls, so it
+// will concatenate incomplete lines.
+// Retuns 0 if an error with line. -1 if line is not complete so it is waiting for
+// this function to be called with the remaining data. A positive number if the
+// line is good. The positive number indicates the number of characters that was
+// parsed from "HexData".
+int parse_hex_line(const char *HexData, unsigned int HexDataLen, hex_info_t *HexInfo)
+{
+  unsigned int off, num;
+  unsigned sum, len, cksum;
+  int temp;
+  const char *ptr;
+  String str;
+
+  if (HexDataLen == 0) {
+    return 0;
+  }
+
+  num = 0;
+  off = 0;
+  if (HexInfo->prevDataLen == 0) {
+    ptr = HexData;
+  } else {
+    // Copy data from the last frame
+    memcpy((void *)&HexInfo->prevData[HexInfo->prevDataLen], (void *)HexData,
+                    fx_min(HEX_LINE_MAX_SIZE - HexInfo->prevDataLen, HexDataLen));
+    ptr = HexInfo->prevData;
+  }
+
+  if (HexDataLen < 11) {
+    // Hex line must be at least 11 octets long
+    goto copy_leftover;
+  }
+  
+  if (ptr[off] != ':') {
+    // Each line must start with the start code
+    goto error;
+  }
+  off++;
+
+  if (!sscanf(&ptr[off], "%02x", &len)) {
+    goto error;
+  }
+  off += 2;
+
+  if (HexDataLen < (11 + (len * 2))) {
+    // Incomplete line. Data length byte doesn't match expected line size
+    goto copy_leftover;
+  }
+
+  if (!sscanf(&ptr[off], "%04x", (unsigned int *)&HexInfo->addr)) {
+    goto error;
+  }
+  off += 4;
+  if (!sscanf(&ptr[off], "%02x", &HexInfo->code)) {
+    goto error;
+  }
+  off += 2;
+
+  sum = (len & 255) + ((HexInfo->addr >> 8) & 255) + (HexInfo->addr & 255) + (HexInfo->code & 255);
+  while (num != len)
+  {
+
+    if (!sscanf(&ptr[off], "%02x", &temp)) {
+      goto error;
+    }
+
+    HexInfo->data[num] = temp;
+    off += 2;
+    sum += HexInfo->data[num] & 255;
+    num++;
+    if (num >= 256) {
+      goto error;
+    }
+  }
+  if (!sscanf(&ptr[off], "%02x", &cksum)) {
+    goto error;
+  }
+  off += 2;
+
+  if (((sum & 255) + (cksum & 255)) & 255) {
+    goto error; /* checksum error */
+  }
+
+  off = off - HexInfo->prevDataLen;
+  HexInfo->num = num;
+  HexInfo->prevDataLen = 0;
+  HexInfo->lines++;
+  // Return the length of the line that was parsed
+  return off;
+
+copy_leftover:
+  memcpy((void *)&HexInfo->prevData[HexInfo->prevDataLen], (void *)ptr, HexDataLen);
+  HexInfo->prevDataLen += HexDataLen;
+  return -1;
+
+error:
+  HexInfo->prevDataLen = 0;
+  return 0;
+}
+
+// Old implementation
+int parse_hex_line(const char *theline, char *bytes,
+                   unsigned int *addr, unsigned int *num, unsigned int *code)
 {
   unsigned sum, len, cksum;
   const char *ptr;
@@ -242,6 +354,6 @@ int parse_hex_line( const char *theline, char *bytes,
     return 0;
 
   if (((sum & 255) + (cksum & 255)) & 255)
-    return 0;     /* checksum error */
+    return 0; /* checksum error */
   return 1;
 }
