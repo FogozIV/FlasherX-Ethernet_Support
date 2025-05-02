@@ -161,5 +161,4 @@ int  flash_erase_block( uint32_t address, uint32_t size );
 int  check_flash_id( uint32_t buffer, uint32_t size );
 int  firmware_buffer_init( uint32_t *buffer_addr, uint32_t *buffer_size );
 void firmware_buffer_free( uint32_t buffer_addr, uint32_t buffer_size );
-
 #endif // _FLASHTXX_H_

@@ -13,7 +13,7 @@ extern "C" {
 // update_firmware()	read hex file and write new firmware to program flash
 //******************************************************************************
 void update_firmware( Stream *in, Stream *out, 
-				uint32_t buffer_addr, uint32_t buffer_size, bool request_confirmation )
+				uint32_t buffer_addr, uint32_t buffer_size, bool request_confirmation)
 {
   static char line[HEX_LINE_MAX_SIZE];                // buffer for hex lines
   static char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(8))); // buffer for hex data
@@ -106,12 +106,12 @@ void update_firmware( Stream *in, Stream *out,
     return;
   }
   else {
-    out->printf( "calling flash_move() to load new firmware...\n" );
+    out->printf( "calling flash_move() to load new firmware...\r\n" );
     out->flush();
   }
   
   // move new program from buffer to flash, free buffer, and reboot
-  flash_move( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min );
+  flash_move( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min);
 
   // should not return from flash_move(), but put REBOOT here as reminder
   REBOOT;

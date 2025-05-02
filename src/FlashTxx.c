@@ -246,7 +246,7 @@ RAMFUNC int flash_sector_not_erased( uint32_t address )
 // move from source to destination (flash), erasing destination sectors as we go
 // DANGER: this is critical and cannot be interrupted, else T3.x can be damaged
 //******************************************************************************
-RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size )
+RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size)
 {
   uint32_t offset=0, error=0, addr;
   __disable_irq()
@@ -388,6 +388,7 @@ int flash_write_block( uint32_t addr, char *data, uint32_t count )
   }  
   return 0;						// return success
 }
+
 
 #if defined(__MK66FX1M0__) // T3.6 only
 
