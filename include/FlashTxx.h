@@ -152,7 +152,7 @@ void eepromemu_flash_erase_64K_block(void *addr);
 #endif // __IMXRT1062__
 
 // functions used to move code from buffer to program flash (must be in RAM)
-RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size );
+RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size);
 
 // functions that can be in flash
 int  flash_write_block( uint32_t addr, char *data, uint32_t count );

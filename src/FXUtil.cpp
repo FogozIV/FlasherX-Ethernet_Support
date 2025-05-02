@@ -13,7 +13,7 @@ extern "C" {
 // update_firmware()	read hex file and write new firmware to program flash
 //******************************************************************************
 void update_firmware( Stream *in, Stream *out, 
-				uint32_t buffer_addr, uint32_t buffer_size )
+				uint32_t buffer_addr, uint32_t buffer_size, bool request_confirmation )
 {
   static char line[HEX_LINE_MAX_SIZE];                // buffer for hex lines
   static char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(8))); // buffer for hex data
@@ -29,7 +29,7 @@ void update_firmware( Stream *in, Stream *out,
   hex.lines = 0;
   hex.prevDataLen = 0;
 
-  out->printf( "reading hex lines...\n" );
+  out->printf( "reading hex lines...\r\n" );
 
   // read and process intel hex lines until EOF or error
   while (!hex.eof)  {
@@ -37,21 +37,22 @@ void update_firmware( Stream *in, Stream *out,
     read_ascii_line( in, line, sizeof(line) );
     // reliability of transfer via USB is improved by this printf/flush
     if (in == out && out == (Stream*)&Serial) {
-      out->printf( "%s\n", line );
+      //out->printf( "%s\r\n", line );
       out->flush();
     }
 
     if (parse_hex_line( (const char*)line, hex.data, &hex.addr, &hex.num, &hex.code ) == 0) {
-      out->printf( "abort - bad hex line %s\n", line );
+      out->printf( "abort - bad hex line %s\r\n", line );
+      return;
     }
     else if (process_hex_record( &hex ) != 0) { // error on bad hex code
-      out->printf( "abort - invalid hex code %d\n", hex.code );
+      out->printf( "abort - invalid hex code %d\r\n", hex.code );
       return;
     }
     else if (hex.code == 0) { // if data record
       uint32_t addr = buffer_addr + hex.base + hex.addr - FLASH_BASE_ADDR;
       if (hex.max > (FLASH_BASE_ADDR + buffer_size)) {
-        out->printf( "abort - max address %08lX too large\n", hex.max );
+        out->printf( "abort - max address %08lX too large\r\n", hex.max );
         return;
       }
       else if (!IN_FLASH(buffer_addr)) {
@@ -60,7 +61,7 @@ void update_firmware( Stream *in, Stream *out,
       else if (IN_FLASH(buffer_addr)) {
         int error = flash_write_block( addr, hex.data, hex.num );
         if (error) {
-          out->printf( "abort - error %02X in flash_write_block()\n", error );
+          out->printf( "abort - error %02X in flash_write_block()\r\n", error );
           return;
         }
       }
@@ -68,7 +69,7 @@ void update_firmware( Stream *in, Stream *out,
     hex.lines++;
   }
     
-  out->printf( "\nhex file: %1d lines %1lu bytes (%08lX - %08lX)\n",
+  out->printf( "\r\nhex file: %1d lines %1lu bytes (%08lX - %08lX)\r\n",
 			hex.lines, hex.max-hex.min, hex.min, hex.max );
 
   // check FSEC value in new code -- abort if incorrect
@@ -85,23 +86,23 @@ void update_firmware( Stream *in, Stream *out,
 
   // check FLASH_ID in new code - abort if not found
   if (check_flash_id( buffer_addr, hex.max - hex.min )) {
-    out->printf( "new code contains correct target ID %s\n", FLASH_ID );
+    out->printf( "new code contains correct target ID %s\r\n", FLASH_ID );
   }
   else {
-    out->printf( "abort - new code missing string %s\n", FLASH_ID );
+    out->printf( "abort - new code missing string %s\r\n", FLASH_ID );
     return;
   }
   
   // get user input to write to flash or abort
   int user_lines = -1;
-  while (user_lines != hex.lines && user_lines != 0) {
-    out->printf( "enter %d to flash or 0 to abort\n", hex.lines );
+  while (user_lines != hex.lines && user_lines != 0 && request_confirmation) {
+    out->printf( "enter %d to flash or 0 to abort\r\n", hex.lines );
     read_ascii_line( out, line, sizeof(line) );
     sscanf( line, "%d", &user_lines );
   }
   
-  if (user_lines == 0) {
-    out->printf( "abort - user entered 0 lines\n" );
+  if (user_lines == 0 && request_confirmation) {
+    out->printf( "abort - user entered 0 lines\r\n" );
     return;
   }
   else {

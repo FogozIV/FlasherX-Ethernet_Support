@@ -249,7 +249,7 @@ RAMFUNC int flash_sector_not_erased( uint32_t address )
 RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size )
 {
   uint32_t offset=0, error=0, addr;
-  
+  __disable_irq()
   // set global flag leave_interrupts_disabled = 1 to prevent the T3.x flash
   // write and erase functions from re-enabling interrupts when they complete 
   leave_interrupts_disabled = 1;
@@ -312,7 +312,6 @@ RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size )
       offset += FLASH_WRITE_SIZE;
     }   
   }
-
   // for T3.x, at least, must REBOOT here (via macro) because original code has
   // been erased and overwritten, so return address is no longer valid
   REBOOT;
