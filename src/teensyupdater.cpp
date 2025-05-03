@@ -43,7 +43,7 @@
  *
  * Returns:        void
  */
-TeensyOtaUpdater::TeensyOtaUpdater(AsyncWebServer *WebServer, const char *UrlPath) :
+TeensyOtaUpdater::TeensyOtaUpdater(std::shared_ptr<AsyncWebServer> WebServer, const char *UrlPath) :
                                                         webServer(WebServer), urlPath(UrlPath)
 {
     otaState      = Idle;
@@ -51,16 +51,21 @@ TeensyOtaUpdater::TeensyOtaUpdater(AsyncWebServer *WebServer, const char *UrlPat
 
     webServer->on(urlPath, HTTP_GET, [&](AsyncWebServerRequest *request)
         {
+            Serial.println("TeensyOtaUpdater::onGet");
             this->DisplayUpdatePage(request);
         });
 
     webServer->on(
         urlPath, HTTP_POST, [&](AsyncWebServerRequest *request)
         {
+            Serial.println("TeensyOtaUpdater::onUpload");
             this->EndOta(request);
         },
         [&](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
         {
+            Serial.println("TeensyOtaUpdater::onUpload");
+            Serial.printf("FILE[%s]: %s, size: %u\n", filename.c_str(), data, len);
+            Serial.printf("index: %u, final: %u\n", index, final);
             this->StartOta(request, filename, index, data, len, final);
         });
 

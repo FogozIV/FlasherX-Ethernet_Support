@@ -56,8 +56,8 @@ typedef std::function<void(void)> TOU_CB;
 class TeensyOtaUpdater
 {
 public:
-
-    TeensyOtaUpdater(AsyncWebServer *WebServ, const char *UrlPath);
+    TeensyOtaUpdater(std::shared_ptr<AsyncWebServer> WebServ, const char *UrlPath);
+    TeensyOtaUpdater(AsyncWebServer* webServ, const char* urlPath) : TeensyOtaUpdater(std::make_shared<AsyncWebServer>(*webServ), urlPath){};
     ~TeensyOtaUpdater();
 
     // Register a callback to be notified when a firmware is pending an update
@@ -86,7 +86,7 @@ private:
     void sendOtaResponse(AsyncWebServerRequest *UploadRequest, bool Success);
 
     // Web server instance
-    AsyncWebServer *webServer;
+    std::shared_ptr<AsyncWebServer> webServer;
     const char *urlPath;
 
     // Fields to manage parsing and saving data from a hex file that was uploaded
