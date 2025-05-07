@@ -29,23 +29,28 @@ bool TCPTeensyUpdater::addData(const char *data, uint16_t len) {
 
 bool TCPTeensyUpdater::parse() {
     updateMutex.lock();
-    String line;
+    char line[128];
+    uint8_t size = 0;
     uint16_t last_string = 0;
     for (int i = 0; i < c_index; i++) {
-        char c = data[i];
-        if (line.length() == 0 && (c == '\n' || c == '\r'))
+        char c = tcp_uploader_buffer[i];
+        if (size == 0 && (c == '\n' || c == '\r'))
             continue;
         if ((c == '\n' || c == '\r')) {
-            last_string = c_index+1;
-            if (!use_line(line))
+            last_string = i+1;
+            line[size] = '\0';
+            if (!use_line(line)) {
+                updateMutex.unlock();
+                abort();
                 return false;
-            line = "";
-            break;
+            }
+            size = 0;
+            continue;
         }
-        line += c;
+        line[size++] = c;
     }
     if (last_string != 0) {
-        memmove(data, &data[last_string], c_index - last_string);
+        memmove(tcp_uploader_buffer, &tcp_uploader_buffer[last_string], c_index - last_string);
     }
     c_index-=last_string;
     updateMutex.unlock();
@@ -59,11 +64,14 @@ bool TCPTeensyUpdater::startFlashMode() {
     if (!bufferMutex.try_lock()) {
         return false;
     }
+    flashing_process = true;
     return init();
 }
 
 void TCPTeensyUpdater::abort() {
     firmware_buffer_free (buffer_addr, buffer_size);
+    flashing_process = false;
+    in_flash_mode = false;
     bufferMutex.unlock();
 }
 
@@ -81,6 +89,10 @@ void TCPTeensyUpdater::callDone() {
     }
 }
 
+bool TCPTeensyUpdater::isFlashing() {
+    return in_flash_mode;
+}
+
 bool TCPTeensyUpdater::init() {
     hex.data = data;
     hex.addr = 0;
@@ -92,19 +104,23 @@ bool TCPTeensyUpdater::init() {
     hex.eof = 0;
     hex.lines = 0;
     hex.prevDataLen = 0;
+    in_flash_mode = true;
     return firmware_buffer_init( &buffer_addr, &buffer_size ) != 0;
 }
 
-bool TCPTeensyUpdater::use_line(String line) {
-    if (parse_hex_line( line.c_str(), hex.data, &hex.addr, &hex.num, &hex.code ) == 0) { //bad hex line
+bool TCPTeensyUpdater::use_line(char* line) {
+    if (parse_hex_line( line, hex.data, &hex.addr, &hex.num, &hex.code ) == 0) { //bad hex line
+        Serial.println("Bad hex line");
         return false;
     }
     if (process_hex_record( &hex ) != 0) { // error on bad hex code
+        Serial.println("Bad hex code");
         return false;
     }
     if (hex.code == 0) { // if data record
         uint32_t addr = buffer_addr + hex.base + hex.addr - FLASH_BASE_ADDR;
         if (hex.max > (FLASH_BASE_ADDR + buffer_size)) { //max address %08lX too large (hex.max )
+            Serial.printf("max address %08lX too large\r\n", hex.max);
             return false;
         }
         if (!IN_FLASH(buffer_addr)) {
@@ -113,6 +129,7 @@ bool TCPTeensyUpdater::use_line(String line) {
         else if (IN_FLASH(buffer_addr)) {
             int error = flash_write_block( addr, hex.data, hex.num );
             if (error) { // "abort - error %02X in flash_write_block()\r\n", error
+                Serial.printf("abort - error %02X in flash_write_block()\r\n", error);
                 return false;
             }
         }

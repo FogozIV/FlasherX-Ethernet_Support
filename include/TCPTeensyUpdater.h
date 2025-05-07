@@ -13,12 +13,12 @@ extern bool flashing_process;
 
 class TCPTeensyUpdater {
     hex_info_t hex;
-    bool in_flash_mode;
+    bool in_flash_mode = false;
     uint32_t buffer_addr, buffer_size;
 
     bool init();
 
-    bool use_line(String line);
+    bool use_line(char *line);
 
 public:
     TCPTeensyUpdater();
@@ -36,6 +36,8 @@ public:
     bool isDone();
 
     void callDone();
+
+    bool isFlashing();
 };
 
 
