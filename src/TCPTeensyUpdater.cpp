@@ -9,7 +9,7 @@ extern "C" {
 #define SIZE_TCP_BUFFER 16384
 DMAMEM char tcp_uploader_buffer[SIZE_TCP_BUFFER];
 uint16_t c_index = 0;
-char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(8)));
+DMAMEM char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(8)));
 std::mutex bufferMutex;
 std::mutex updateMutex;
 
@@ -17,7 +17,7 @@ TCPTeensyUpdater::TCPTeensyUpdater() {
 
 }
 
-bool TCPTeensyUpdater::addData(const char *data, uint16_t len) {
+FLASHMEM bool TCPTeensyUpdater::addData(const char *data, uint16_t len) {
     updateMutex.lock();
     for (int i =0; i < len; i++) {
         tcp_uploader_buffer[c_index+i] = data[i];
@@ -27,7 +27,7 @@ bool TCPTeensyUpdater::addData(const char *data, uint16_t len) {
     return true;
 }
 
-bool TCPTeensyUpdater::parse() {
+FLASHMEM bool TCPTeensyUpdater::parse() {
     updateMutex.lock();
     char line[128];
     uint8_t size = 0;
@@ -57,7 +57,7 @@ bool TCPTeensyUpdater::parse() {
     return true;
 }
 
-bool TCPTeensyUpdater::startFlashMode() {
+FLASHMEM bool TCPTeensyUpdater::startFlashMode() {
     if (flashing_process) {
         return false;
     }
@@ -68,32 +68,32 @@ bool TCPTeensyUpdater::startFlashMode() {
     return init();
 }
 
-void TCPTeensyUpdater::abort() {
+FLASHMEM void TCPTeensyUpdater::abort() {
     firmware_buffer_free (buffer_addr, buffer_size);
     flashing_process = false;
     in_flash_mode = false;
     bufferMutex.unlock();
 }
 
-bool TCPTeensyUpdater::isValid() {
+FLASHMEM bool TCPTeensyUpdater::isValid() {
     return check_flash_id( buffer_addr, hex.max - hex.min );
 }
 
-bool TCPTeensyUpdater::isDone() {
+FLASHMEM bool TCPTeensyUpdater::isDone() {
     return hex.eof;
 }
 
-void TCPTeensyUpdater::callDone() {
+FLASHMEM void TCPTeensyUpdater::callDone() {
     if (isDone() && isValid()) {
         flash_move( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min);
     }
 }
 
-bool TCPTeensyUpdater::isFlashing() {
+FLASHMEM bool TCPTeensyUpdater::isFlashing() {
     return in_flash_mode;
 }
 
-bool TCPTeensyUpdater::init() {
+FLASHMEM bool TCPTeensyUpdater::init() {
     hex.data = data;
     hex.addr = 0;
     hex.code = 0;
@@ -108,7 +108,7 @@ bool TCPTeensyUpdater::init() {
     return firmware_buffer_init( &buffer_addr, &buffer_size ) != 0;
 }
 
-bool TCPTeensyUpdater::use_line(char* line) {
+FLASHMEM bool TCPTeensyUpdater::use_line(char* line) {
     if (parse_hex_line( line, hex.data, &hex.addr, &hex.num, &hex.code ) == 0) { //bad hex line
         Serial.println("Bad hex line");
         return false;
