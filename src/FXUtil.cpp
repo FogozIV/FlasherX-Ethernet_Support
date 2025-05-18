@@ -36,8 +36,8 @@ void update_firmware( Stream *in, Stream *out,
 
     read_ascii_line( in, line, sizeof(line) );
     // reliability of transfer via USB is improved by this printf/flush
-    if (in == out && out == (Stream*)&Serial) {
-      //out->printf( "%s\r\n", line );
+    if (in == out && (out == (Stream*)&Serial || out == (Stream*)&Serial7)) {
+      out->printf( "%s\r\n", line );
       out->flush();
     }
 
