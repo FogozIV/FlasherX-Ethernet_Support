@@ -37,13 +37,20 @@ void update_firmware( Stream *in, Stream *out,
     read_ascii_line( in, line, sizeof(line) );
     // reliability of transfer via USB is improved by this printf/flush
     if (in == out && (out == (Stream*)&Serial || out == (Stream*)&Serial7)) {
-      out->printf( "%s\r\n", line );
+      //out->printf( "%s\r\n", line );
       out->flush();
     }
 
     if (parse_hex_line( (const char*)line, hex.data, &hex.addr, &hex.num, &hex.code ) == 0) {
-      out->printf( "abort - bad hex line %s\r\n", line );
-      return;
+        int user_lines = -1;
+        sscanf(line, "%d", &user_lines);
+        if(user_lines == 0){
+            out->printf( "abort - bad hex line %s\r\n", line );
+            return;
+        }else{
+            out->printf("Bad line : please retry\r\n");
+            continue;
+        }
     }
     else if (process_hex_record( &hex ) != 0) { // error on bad hex code
       out->printf( "abort - invalid hex code %d\r\n", hex.code );
