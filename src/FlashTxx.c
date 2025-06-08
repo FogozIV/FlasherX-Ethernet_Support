@@ -246,14 +246,71 @@ RAMFUNC int flash_sector_not_erased( uint32_t address )
 // move from source to destination (flash), erasing destination sectors as we go
 // DANGER: this is critical and cannot be interrupted, else T3.x can be damaged
 //******************************************************************************
-RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size)
+RAMFUNC void flash_move(uint32_t dst, uint32_t src, uint32_t size) {
+  __disable_irq();
+  leave_interrupts_disabled = 1;
+
+  uint32_t offset = 0;
+  uint32_t error = 0;
+  uint8_t buffer[64];
+
+  // Main copy loop: 64-byte chunks
+  while ((offset + 64) <= size && error == 0) {
+    uint32_t addr = dst + offset;
+
+    if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
+      eepromemu_flash_erase_sector((void*)addr);
+    }
+
+    memcpy(buffer, (void*)(src + offset), 64);
+
+    if (memcmp((void*)addr, buffer, 64) != 0) {
+      eepromemu_flash_write((void*)addr, buffer, 64);
+    }
+
+    offset += 64;
+  }
+
+  // Handle remaining bytes (less than 64)
+  if (offset < size && error == 0) {
+    uint32_t addr = dst + offset;
+    uint32_t remaining = size - offset;
+
+    if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
+      eepromemu_flash_erase_sector((void*)addr);
+    }
+
+    memset(buffer, 0xFF, 64);  // Fill unused part with erased value
+    memcpy(buffer, (void*)(src + offset), remaining);
+
+    if (memcmp((void*)addr, buffer, 64) != 0) {
+      eepromemu_flash_write((void*)addr, buffer, 64);
+    }
+  }
+
+  // Optional: erase remainder of flash if source is in flash
+  if (IN_FLASH(src)) {
+    offset = (size + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1);  // align up
+    while (offset < (FLASH_SIZE - FLASH_RESERVE) && error == 0) {
+      uint32_t addr = dst + offset;
+      if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
+        eepromemu_flash_erase_sector((void*)addr);
+      }
+      offset += FLASH_SECTOR_SIZE;
+    }
+  }
+
+  REBOOT;
+  for (;;) {}
+}
+RAMFUNC void flash_move_old( uint32_t dst, uint32_t src, uint32_t size)
 {
   uint32_t offset=0, error=0, addr;
   __disable_irq()
   // set global flag leave_interrupts_disabled = 1 to prevent the T3.x flash
-  // write and erase functions from re-enabling interrupts when they complete 
+  // write and erase functions from re-enabling interrupts when they complete
   leave_interrupts_disabled = 1;
-  
+
   // move size bytes containing new program from source to destination
   while (offset < size && error == 0) {
 
@@ -277,12 +334,12 @@ RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size)
         #endif
       }
     }
-    
+
     // for KINETIS, these writes may be to the sector containing FSEC, but the
     // FSEC location was written by the code above, so use aFSEC=1, oFSEC=0
     #if defined(__IMXRT1062__)
       // for T4.x, data address passed to flash_write() must be in RAM
-      uint32_t value = *(uint32_t *)(src + offset);     
+      uint32_t value = *(uint32_t *)(src + offset);
       eepromemu_flash_write( (void*)addr, &value, 4 );
     #elif (FLASH_WRITE_SIZE==4)
       error |= flash_word( addr, *(uint32_t *)(src + offset), 1, 0 );
@@ -292,7 +349,7 @@ RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size)
 
     offset += FLASH_WRITE_SIZE;
   }
-  
+
   // move is complete. if the source buffer (src) is in FLASH, erase the buffer
   // by erasing all sectors from top of new program to bottom of FLASH_RESERVE,
   // which leaves FLASH in same state as if code was loaded using TeensyDuino.
@@ -310,12 +367,12 @@ RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size)
 	}
       }
       offset += FLASH_WRITE_SIZE;
-    }   
+    }
   }
   // for T3.x, at least, must REBOOT here (via macro) because original code has
   // been erased and overwritten, so return address is no longer valid
   REBOOT;
-  // wait here until REBOOT actually happens 
+  // wait here until REBOOT actually happens
   for (;;) {}
 }
 

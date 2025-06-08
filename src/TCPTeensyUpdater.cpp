@@ -7,6 +7,7 @@ extern "C" {
 #include "FlashTxx.h"		// TLC/T3x/T4x/TMM flash primitives
 }
 #define SIZE_TCP_BUFFER 16384
+
 DMAMEM char tcp_uploader_buffer[SIZE_TCP_BUFFER];
 uint16_t c_index = 0;
 DMAMEM char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(8)));
