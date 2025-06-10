@@ -3,31 +3,34 @@
 //
 
 #include "TCPTeensyUpdater.h"
+
+#include <cmsis_gcc.h>      // Or
+#include "../../../include/utils/config.h"
+#include "../../../include/utils/StreamSplitter.h"
 extern "C" {
 #include "FlashTxx.h"		// TLC/T3x/T4x/TMM flash primitives
 }
-#define SIZE_TCP_BUFFER 16384
+#define SIZE_TCP_BUFFER 32768
 
-DMAMEM char tcp_uploader_buffer[SIZE_TCP_BUFFER];
+DMAMEM char tcp_uploader_buffer[SIZE_TCP_BUFFER] __attribute__((aligned(32)));
 uint16_t c_index = 0;
-DMAMEM char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(8)));
+DMAMEM char data[HEX_DATA_MAX_SIZE] __attribute__((aligned(32)));
 std::mutex bufferMutex;
 std::mutex updateMutex;
 
 TCPTeensyUpdater::TCPTeensyUpdater() {
 
 }
-
+extern "C" {
+    extern char _heap_start, _heap_end, _sbss, _ebss, _sdata, _edata;
+}
 FASTRUN bool TCPTeensyUpdater::addData(const char *data, uint16_t len) {
     updateMutex.lock();
-    noInterrupts()
-    digitalWrite(LED_BUILTIN, HIGH);
-    for (int i =0; i < len; i++) {
-        tcp_uploader_buffer[c_index+i] = data[i];
-    }
+    assert(reinterpret_cast<uintptr_t>(tcp_uploader_buffer) % 32 == 0); // 32-byte aligned
+    assert(reinterpret_cast<uintptr_t>(data) % 4 == 0); // At least 4-byte aligned
+    assert(c_index + len <= SIZE_TCP_BUFFER);
+    memcpy(&tcp_uploader_buffer[c_index], data, len);
     c_index += len;
-    digitalWrite(LED_BUILTIN, LOW);
-    interrupts()
     updateMutex.unlock();
     return true;
 }
@@ -44,7 +47,9 @@ FASTRUN bool TCPTeensyUpdater::parse() {
         if ((c == '\n' || c == '\r')) {
             last_string = i+1;
             line[size] = '\0';
+            Serial.println(line);
             if (!use_line(line)) {
+                streamSplitter.println("Aborting");
                 updateMutex.unlock();
                 abort();
                 return false;
@@ -52,8 +57,10 @@ FASTRUN bool TCPTeensyUpdater::parse() {
             size = 0;
             continue;
         }
+        assert(size < sizeof(line) - 1);
         line[size++] = c;
     }
+    assert(last_string <= c_index);
     if (last_string != 0) {
         memmove(tcp_uploader_buffer, &tcp_uploader_buffer[last_string], c_index - last_string);
     }
@@ -78,6 +85,7 @@ void TCPTeensyUpdater::abort() {
     firmware_buffer_free (buffer_addr, buffer_size);
     flashing_process = false;
     in_flash_mode = false;
+    interrupts();
     bufferMutex.unlock();
 }
 
@@ -89,9 +97,73 @@ bool TCPTeensyUpdater::isDone() {
     return hex.eof;
 }
 
-void TCPTeensyUpdater::callDone() {
+RAMFUNC void flash_move_nw(uint32_t dst, uint32_t src, uint32_t size) {
+    __set_FAULTMASK(1); //disable interrupt
+    uint32_t offset = 0;
+    uint32_t error = 0;
+    uint8_t buffer[64] __aligned(64);
+
+    // Main copy loop: 64-byte chunks
+    while ((offset + 64) <= size && error == 0) {
+        uint32_t addr = dst + offset;
+        /*
+        if (addr % 1024 == 0) {
+            Serial.printf("%p\r\n", (void*)addr);
+        }*/
+        /*
+        if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
+            Serial.println("flash_sector_not_erased");
+            assert((addr % FLASH_SECTOR_SIZE) == 0);
+            eepromemu_flash_erase_sector((void*)addr);
+        }*/
+
+        memcpy(buffer, (void*)(src + offset), 64);
+
+        if (memcmp((void*)addr, buffer, 64) != 0) {
+            eepromemu_flash_write((void*)addr, buffer, 64);
+        }
+
+        offset += 64;
+    }
+    // Handle remaining bytes (less than 64)
+    if (offset < size && error == 0) {
+        uint32_t addr = dst + offset;
+        uint32_t remaining = size - offset;
+
+        if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
+            eepromemu_flash_erase_sector((void*)addr);
+        }
+
+        memset(buffer, 0xFF, 64);  // Fill unused part with erased value
+        memcpy(buffer, (void*)(src + offset), remaining);
+
+        if (memcmp((void*)addr, buffer, 64) != 0) {
+            eepromemu_flash_write((void*)addr, buffer, 64);
+        }
+    }
+    /*
+    Serial.println("flash_sector_erased");
+    Serial.printf("end: %p\r\n", (void*)(dst+size));
+    */
+    // Optional: erase remainder of flash if source is in flash
+    if (IN_FLASH(src)) {
+      offset = (size + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1);  // align up
+      while (offset < (FLASH_SIZE - FLASH_RESERVE) && error == 0) {
+        uint32_t addr = dst + offset;
+        if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
+          eepromemu_flash_erase_sector((void*)addr);
+        }
+        offset += FLASH_SECTOR_SIZE;
+      }
+    }
+
+    REBOOT;
+    for (;;) {}
+}
+void FASTRUN TCPTeensyUpdater::callDone() {
     if (isDone() && isValid()) {
-        flash_move( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min);
+        streamSplitter.printf("Flash move : %p\r\n", flash_move_nw);
+        flash_move_nw( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min);
     }
 }
 
@@ -99,7 +171,7 @@ bool TCPTeensyUpdater::isFlashing() {
     return in_flash_mode;
 }
 
-bool TCPTeensyUpdater::init() {
+FASTRUN bool TCPTeensyUpdater::init() {
     hex.data = data;
     hex.addr = 0;
     hex.code = 0;
@@ -111,22 +183,25 @@ bool TCPTeensyUpdater::init() {
     hex.lines = 0;
     hex.prevDataLen = 0;
     in_flash_mode = true;
-    return firmware_buffer_init( &buffer_addr, &buffer_size ) != 0;
+    bool was_able_to_create = firmware_buffer_init( &buffer_addr, &buffer_size ) != 0;
+    streamSplitter.printf("%p\r\n", buffer_addr);
+    streamSplitter.printf("%u\r\n", buffer_size);
+    return was_able_to_create;
 }
 
 FASTRUN bool TCPTeensyUpdater::use_line(char* line) {
     if (parse_hex_line( line, hex.data, &hex.addr, &hex.num, &hex.code ) == 0) { //bad hex line
-        Serial.println("Bad hex line");
+        streamSplitter.println("Bad hex line");
         return false;
     }
     if (process_hex_record( &hex ) != 0) { // error on bad hex code
-        Serial.println("Bad hex code");
+        streamSplitter.println("Bad hex code");
         return false;
     }
     if (hex.code == 0) { // if data record
         uint32_t addr = buffer_addr + hex.base + hex.addr - FLASH_BASE_ADDR;
         if (hex.max > (FLASH_BASE_ADDR + buffer_size)) { //max address %08lX too large (hex.max )
-            Serial.printf("max address %08lX too large\r\n", hex.max);
+            streamSplitter.printf("max address %08lX too large\r\n", hex.max);
             return false;
         }
         if (!IN_FLASH(buffer_addr)) {
@@ -135,7 +210,7 @@ FASTRUN bool TCPTeensyUpdater::use_line(char* line) {
         else if (IN_FLASH(buffer_addr)) {
             int error = flash_write_block( addr, hex.data, hex.num );
             if (error) { // "abort - error %02X in flash_write_block()\r\n", error
-                Serial.printf("abort - error %02X in flash_write_block()\r\n", error);
+                streamSplitter.printf("abort - error %02X in flash_write_block()\r\n", error);
                 return false;
             }
         }

@@ -20,12 +20,14 @@
 #include <string.h>		// memset()
 #include "FlashTxx.h"		// FLASH_BASE_ADDRESS, FLASH_SECTOR_SIZE, etc.
 
+#include <usb_serial.h>
+
 static int leave_interrupts_disabled = 0;
 
 //******************************************************************************
 // compute addr/size for firmware buffer and return NO/RAM/FLASH_BUFFER_TYPE
 //******************************************************************************
-int firmware_buffer_init( uint32_t *buffer_addr, uint32_t *buffer_size )
+RAMFUNC int firmware_buffer_init( uint32_t *buffer_addr, uint32_t *buffer_size )
 {
   #if defined(__MK66FX1M0__)     // for T3.6 only
   LMEM_EnableCodeCache( false ); // disable LMEM code cache for flash operations
@@ -60,7 +62,7 @@ int firmware_buffer_init( uint32_t *buffer_addr, uint32_t *buffer_size )
 //******************************************************************************
 // compute addr/size for firmware buffer and return NO/RAM/FLASH_BUFFER_TYPE
 //******************************************************************************
-void firmware_buffer_free( uint32_t buffer_addr, uint32_t buffer_size )
+RAMFUNC void firmware_buffer_free( uint32_t buffer_addr, uint32_t buffer_size )
 {
   if (IN_FLASH(buffer_addr))
     flash_erase_block( buffer_addr, buffer_size );
@@ -71,7 +73,7 @@ void firmware_buffer_free( uint32_t buffer_addr, uint32_t buffer_size )
 //******************************************************************************
 // search buffer for string FLASH_ID to verify code was built for correct TARGET
 //******************************************************************************
-int check_flash_id( uint32_t buffer, uint32_t size )
+RAMFUNC int check_flash_id( uint32_t buffer, uint32_t size )
 {
   const uint32_t bufferSize = buffer + size - FLASH_ID_LEN;
   for (uint32_t i = buffer; i < bufferSize; ++i) {
@@ -246,64 +248,7 @@ RAMFUNC int flash_sector_not_erased( uint32_t address )
 // move from source to destination (flash), erasing destination sectors as we go
 // DANGER: this is critical and cannot be interrupted, else T3.x can be damaged
 //******************************************************************************
-RAMFUNC void flash_move(uint32_t dst, uint32_t src, uint32_t size) {
-  __disable_irq();
-  leave_interrupts_disabled = 1;
-
-  uint32_t offset = 0;
-  uint32_t error = 0;
-  uint8_t buffer[64];
-
-  // Main copy loop: 64-byte chunks
-  while ((offset + 64) <= size && error == 0) {
-    uint32_t addr = dst + offset;
-
-    if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
-      eepromemu_flash_erase_sector((void*)addr);
-    }
-
-    memcpy(buffer, (void*)(src + offset), 64);
-
-    if (memcmp((void*)addr, buffer, 64) != 0) {
-      eepromemu_flash_write((void*)addr, buffer, 64);
-    }
-
-    offset += 64;
-  }
-
-  // Handle remaining bytes (less than 64)
-  if (offset < size && error == 0) {
-    uint32_t addr = dst + offset;
-    uint32_t remaining = size - offset;
-
-    if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
-      eepromemu_flash_erase_sector((void*)addr);
-    }
-
-    memset(buffer, 0xFF, 64);  // Fill unused part with erased value
-    memcpy(buffer, (void*)(src + offset), remaining);
-
-    if (memcmp((void*)addr, buffer, 64) != 0) {
-      eepromemu_flash_write((void*)addr, buffer, 64);
-    }
-  }
-
-  // Optional: erase remainder of flash if source is in flash
-  if (IN_FLASH(src)) {
-    offset = (size + FLASH_SECTOR_SIZE - 1) & ~(FLASH_SECTOR_SIZE - 1);  // align up
-    while (offset < (FLASH_SIZE - FLASH_RESERVE) && error == 0) {
-      uint32_t addr = dst + offset;
-      if ((addr & (FLASH_SECTOR_SIZE - 1)) == 0 && flash_sector_not_erased(addr)) {
-        eepromemu_flash_erase_sector((void*)addr);
-      }
-      offset += FLASH_SECTOR_SIZE;
-    }
-  }
-
-  REBOOT;
-  for (;;) {}
-}
-RAMFUNC void flash_move_old( uint32_t dst, uint32_t src, uint32_t size)
+RAMFUNC void flash_move( uint32_t dst, uint32_t src, uint32_t size)
 {
   uint32_t offset=0, error=0, addr;
   __disable_irq()
@@ -354,6 +299,7 @@ RAMFUNC void flash_move_old( uint32_t dst, uint32_t src, uint32_t size)
   // by erasing all sectors from top of new program to bottom of FLASH_RESERVE,
   // which leaves FLASH in same state as if code was loaded using TeensyDuino.
   // For KINETIS, this erase cannot include FSEC, so erase uses aFSEC=0.
+
   if (IN_FLASH(src)) {
     while (offset < (FLASH_SIZE - FLASH_RESERVE) && error == 0) {
       addr = dst + offset;
@@ -401,7 +347,7 @@ int flash_erase_block( uint32_t start, uint32_t size )
 //******************************************************************************
 // take a 32-bit aligned array of 32-bit values and write it to erased flash
 //******************************************************************************
-int flash_write_block( uint32_t addr, char *data, uint32_t count )
+FASTRUN int flash_write_block( uint32_t addr, char *data, uint32_t count )
 {
   // static (aligned) variables to guarantee 32-bit or 64-bit-aligned writes
   #if (FLASH_WRITE_SIZE == 4)				// #if 4-byte writes
@@ -429,7 +375,7 @@ int flash_write_block( uint32_t addr, char *data, uint32_t count )
     ((char*)&buf)[buf_count++] = data[data_i++];	//   copy a byte to buf
     if (buf_count < FLASH_WRITE_SIZE) {			//   if buf not complete
       continue;						//     continue while()
-    }							//   
+    }							//
     #if defined(__IMXRT1062__)				//   #if T4.x 4-byte
       eepromemu_flash_write((void*)addr,(void*)&buf,4);	//     flash_write()
     #elif (FLASH_WRITE_SIZE==4)				//   #elif T3.x 4-byte 
