@@ -3,10 +3,6 @@
 //
 
 #include "TCPTeensyUpdater.h"
-
-#include <cmsis_gcc.h>      // Or
-#include "../../../include/utils/config.h"
-#include "../../../include/utils/StreamSplitter.h"
 extern "C" {
 #include "FlashTxx.h"		// TLC/T3x/T4x/TMM flash primitives
 }
@@ -47,9 +43,7 @@ FASTRUN bool TCPTeensyUpdater::parse() {
         if ((c == '\n' || c == '\r')) {
             last_string = i+1;
             line[size] = '\0';
-            Serial.println(line);
             if (!use_line(line)) {
-                streamSplitter.println("Aborting");
                 updateMutex.unlock();
                 abort();
                 return false;
@@ -98,10 +92,18 @@ bool TCPTeensyUpdater::isDone() {
 }
 
 RAMFUNC void flash_move_nw(uint32_t dst, uint32_t src, uint32_t size) {
-    __set_FAULTMASK(1); //disable interrupt
+    __asm volatile ("MSR faultmask, %0" : : "r" (1) : "memory"); //should disable interrupt once and for all
     uint32_t offset = 0;
     uint32_t error = 0;
-    uint8_t buffer[64] __aligned(64);
+    size_t original_size = 64;
+    size_t alignment = 64;
+
+    // Allocate enough for original size plus alignment-1 bytes
+    char* raw_buffer = (char*) malloc(original_size + alignment - 1);
+    assert(raw_buffer!= NULL);
+
+    // Align the pointer
+    char* buffer = (char*)(((uintptr_t)raw_buffer + alignment - 1) & ~(alignment - 1));
 
     // Main copy loop: 64-byte chunks
     while ((offset + 64) <= size && error == 0) {
@@ -162,7 +164,6 @@ RAMFUNC void flash_move_nw(uint32_t dst, uint32_t src, uint32_t size) {
 }
 void FASTRUN TCPTeensyUpdater::callDone() {
     if (isDone() && isValid()) {
-        streamSplitter.printf("Flash move : %p\r\n", flash_move_nw);
         flash_move_nw( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min);
     }
 }
@@ -184,24 +185,22 @@ FASTRUN bool TCPTeensyUpdater::init() {
     hex.prevDataLen = 0;
     in_flash_mode = true;
     bool was_able_to_create = firmware_buffer_init( &buffer_addr, &buffer_size ) != 0;
-    streamSplitter.printf("%p\r\n", buffer_addr);
-    streamSplitter.printf("%u\r\n", buffer_size);
     return was_able_to_create;
 }
 
 FASTRUN bool TCPTeensyUpdater::use_line(char* line) {
     if (parse_hex_line( line, hex.data, &hex.addr, &hex.num, &hex.code ) == 0) { //bad hex line
-        streamSplitter.println("Bad hex line");
+        Serial.println("Bad hex line");
         return false;
     }
     if (process_hex_record( &hex ) != 0) { // error on bad hex code
-        streamSplitter.println("Bad hex code");
+        Serial.println("Bad hex code");
         return false;
     }
     if (hex.code == 0) { // if data record
         uint32_t addr = buffer_addr + hex.base + hex.addr - FLASH_BASE_ADDR;
         if (hex.max > (FLASH_BASE_ADDR + buffer_size)) { //max address %08lX too large (hex.max )
-            streamSplitter.printf("max address %08lX too large\r\n", hex.max);
+            Serial.printf("max address %08lX too large\r\n", hex.max);
             return false;
         }
         if (!IN_FLASH(buffer_addr)) {
@@ -210,7 +209,7 @@ FASTRUN bool TCPTeensyUpdater::use_line(char* line) {
         else if (IN_FLASH(buffer_addr)) {
             int error = flash_write_block( addr, hex.data, hex.num );
             if (error) { // "abort - error %02X in flash_write_block()\r\n", error
-                streamSplitter.printf("abort - error %02X in flash_write_block()\r\n", error);
+                Serial.printf("abort - error %02X in flash_write_block()\r\n", error);
                 return false;
             }
         }
