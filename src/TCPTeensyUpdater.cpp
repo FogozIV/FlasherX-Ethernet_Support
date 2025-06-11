@@ -90,7 +90,7 @@ bool TCPTeensyUpdater::isValid() {
 bool TCPTeensyUpdater::isDone() {
     return hex.eof;
 }
-
+#if 0
 RAMFUNC void flash_move_nw(uint32_t dst, uint32_t src, uint32_t size) {
     __asm volatile ("MSR faultmask, %0" : : "r" (1) : "memory"); //should disable interrupt once and for all
     uint32_t offset = 0;
@@ -162,9 +162,11 @@ RAMFUNC void flash_move_nw(uint32_t dst, uint32_t src, uint32_t size) {
     REBOOT;
     for (;;) {}
 }
+#endif
 void FASTRUN TCPTeensyUpdater::callDone() {
     if (isDone() && isValid()) {
-        flash_move_nw( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min);
+        asm volatile ("MSR faultmask, %0" : : "r" (1) : "memory"); //disable interrupt the nuclear way
+        flash_move( FLASH_BASE_ADDR, buffer_addr, hex.max-hex.min);
     }
 }
 
