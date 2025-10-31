@@ -29,7 +29,7 @@
  * ********************************************************************************************
  */
 
-#include <teensyUpdater.hpp>
+#include <TeensyUpdater.hpp>
 
 #define HTTP_MAX_MESSAGE_RESP 512
 
