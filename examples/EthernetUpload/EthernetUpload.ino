@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <QNEthernet.h>
 #include <AsyncWebServer_Teensy41.h> /* Only to be included once here to avoid multiple definitions. Other files can include the ".hpp" version */
-#include <teensyupdater.hpp>
+#include <TeensyUpdater.hpp>
 
 using namespace qindesign::network;
 

@@ -6,7 +6,7 @@
 #define PAMITEENSY_ETHERNETUPLOAD_H
 
 #include <AsyncWebServer_Teensy41.hpp>
-#include "teensyupdater.hpp"
+#include "TeensyUpdater.hpp"
 
 void handleNotFound(AsyncWebServerRequest *Request);
 
